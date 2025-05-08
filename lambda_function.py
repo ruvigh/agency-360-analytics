@@ -1597,5 +1597,4 @@ def lambda_handler(event=None, context=None):
 
 # Uncomment the line below for development only
 if __name__ == "__main__":
-    print(DB_NAME)
-    #lambda_handler()
+    lambda_handler()
