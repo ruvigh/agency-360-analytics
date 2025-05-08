@@ -1,8 +1,11 @@
+""" ONLY FOR DEVELOPMENT REMOVE ON LAMBDA """
+from dotenv import load_dotenv, dotenv_values 
+load_dotenv()
+
 """ IMPORTS """
 import boto3
 import json
 import os
-from dotenv import load_dotenv, dotenv_values 
 from typing import List, Dict, Any, Optional, Union
 from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
@@ -1593,5 +1596,6 @@ def lambda_handler(event=None, context=None):
     
 
 # Uncomment the line below for development only
-#if __name__ == "__main__":
-#    lambda_handler()
+if __name__ == "__main__":
+    print(DB_NAME)
+    #lambda_handler()
