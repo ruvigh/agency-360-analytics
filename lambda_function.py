@@ -260,7 +260,6 @@ class SQSManager:
             return False
 
 """ 2. TEST AWS SERVICES MANAGER """
-
 class TestAwsServices:
     def __init__(self, params=None):
         # Get current date and 30 days ago for CE
@@ -339,8 +338,6 @@ class TestAwsServices:
             return False
         else:
             return True
-
-
 
 """ 3. DB MANAGER """
 class DBManager:
@@ -1576,6 +1573,7 @@ class CoreUpdateDb:
         except Exception as e:
             print(f"✗ Error: An unexpected error occurred: {str(e)}")
 
+""" 5. METHODS FOR LAMBDA """
 def test_connection():
     check = TestAwsServices()
     return check.test_obs_360_connection()  
