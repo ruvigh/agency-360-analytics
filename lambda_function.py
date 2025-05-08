@@ -2,10 +2,10 @@
 import boto3
 import json
 import os
-
+from dotenv import load_dotenv, dotenv_values 
 from typing import List, Dict, Any, Optional, Union
 from botocore.exceptions import ClientError
-from datetime import datetime
+from datetime import datetime, timedelta
 
 """ GLOBAL VARIABLES """
 SUCCESS         = "🟢"  # Green dot
@@ -16,6 +16,7 @@ DB_NAME         = os.environ.get("DB_NAME")
 ARN_AURORA      = os.environ.get("AURORA_CLUSTER_ARN")
 ARN_SECRET      = os.environ.get("AURORA_SECRET_ARN")
 ARN_SQS         = os.environ.get("SQS_QUEUE_ARN")
+REGION          = os.environ.get("REGION")
 
 AWS_TYPECASTS   =   {
                         'created_at': 'timestamp with time zone',
@@ -258,7 +259,90 @@ class SQSManager:
                 print(f"Error purging queue: {e}")
             return False
 
-""" 2. DB MANAGER """
+""" 2. TEST AWS SERVICES MANAGER """
+
+class TestAwsServices:
+    def __init__(self, params=None):
+        # Get current date and 30 days ago for CE
+        self.end_date           = datetime.now()
+        self.start_date         = self.end_date - timedelta(days=30)
+        self.obs360_services    = {
+                                    'sts'                : {
+                                                            'name'      : 'STS',
+                                                            'client'    : boto3.client('sts'), 
+                                                            'action'    : 'get_caller_identity', 
+                                                            'params'    : params,
+                                                            'status'    : False,
+                                                        },
+                                    'account'            : {    
+                                                            'name'      : 'Account',
+                                                            'client'    : boto3.client('account'), 
+                                                            'action'    : 'get_contact_information', 
+                                                            'params'    : params,
+                                                            'status'    : False
+                                                        },
+                                    'sqs'                : {
+                                                            'name'      : 'SQS',
+                                                            'client'    : boto3.client('sqs', region_name=REGION), 
+                                                            'action'    : 'list_queues', 
+                                                            'params'    : params,
+                                                            'status'    : False
+                                                        },
+                                    'rds-data'           : {
+                                                            'name'      : 'Aurora RDS', 
+                                                            'client'    : boto3.client('rds-data'),
+                                                            'action'    : 'close',  
+                                                            'params'    : params
+                                                        }
+                                 }
+
+    def _run_test(self, service):
+        try:
+            if service['params']:
+                service['client'].__getattribute__(service['action'])(**service['params'])
+            else:
+                service['client'].__getattribute__(service['action'])()
+            service['status'] = True
+            print(f"{SUCCESS} Connected to {service['name']}")
+        except ClientError as e:
+            print(f"{FAIL} Not Connected to {service['name']}: {str(e)}")
+            service['status'] = False
+        except Exception as e:
+            print(f"{ERROR} Error testing {service['name']}: {str(e)}")
+            service['status'] = None
+
+    
+
+    def test_obs_360_connection(self):
+        print("Testing Database and Other connections")
+        print("*"*40)
+
+        passed  = 0
+        failed  = 0
+        counter = 0
+
+        for key, val in self.obs360_services.items():
+            self._run_test(val)
+            
+            if val['status'] == True:
+                passed += 1
+            elif val['status'] == False:
+                failed += 1
+
+            counter += 1
+        
+        error = counter - (passed + failed)
+
+        print(f"\n\033[92m{passed} Connected\033[0m \n\033[93m{failed} Not Connected\033[0m \n\033[91m{error} Has Errors\033[0m\n")
+
+        if(failed > 0):
+            return False
+        else:
+            return True
+
+
+
+""" 3. DB MANAGER """
 class DBManager:
     def __init__(self, database_name: str, cluster_arn: None, secret_arn: None):
         """
@@ -851,7 +935,7 @@ class DBManager:
             print(f"Transaction error: {str(e)}")
             return False
 
-""" 3. CORE DB MANAGER """
+""" 4. CORE DB MANAGER """
 class CoreUpdateDb:
     def __init__(self):
         
@@ -1492,17 +1576,24 @@ class CoreUpdateDb:
         except Exception as e:
             print(f"✗ Error: An unexpected error occurred: {str(e)}")
 
+def test_connection():
+    check = TestAwsServices()
+    return check.test_obs_360_connection()  
 
 def lambda_handler(event=None, context=None):
-    try:
-        core = CoreUpdateDb()  # Replace with your core class initialization
-        test = core.load_from_sqs()
-        print(test)
-    except Exception as e:
-        print(f"Failed to process file: {str(e)}")    
+    if(test_connection()):
+        print("tested")
+        try:
+            core = CoreUpdateDb()  # Replace with your core class initialization
+            test = core.load_from_sqs()
+            print(test)
+        except Exception as e:
+            print(f"Failed to process file: {str(e)}")
+    else:
+        return False
 
     
 
 # Uncomment the line below for development only
-#if __name__ == "__main__":
-#    lambda_handler()
+if __name__ == "__main__":
+    lambda_handler()
