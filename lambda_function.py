@@ -145,7 +145,7 @@ class SQSManager:
 
     def receive_messages(self,
                         message_group_id: str = None,  # Kept for compatibility
-                        max_messages: int = 6,
+                        max_messages: int = 10,
                         wait_time_seconds: int = 50,
                         visibility_timeout: int = 50,
                         message_attributes: List[str] = None) -> List[Dict]:
@@ -942,6 +942,8 @@ class CoreUpdateDb:
         self.sts_client = boto3.client('sts')
         self.db         = DBManager(database_name=DB_NAME, cluster_arn=ARN_AURORA, secret_arn=ARN_SECRET)
         self.sqs        = SQSManager(queue_arn=ARN_SQS)
+        self.handle_arr = []
+
         self.stats      = {
                             'CREATED': 0,
                             'UPDATED': 0,
@@ -950,17 +952,19 @@ class CoreUpdateDb:
     
         self.data       = []
 
-    def fetch_data(self):   
+    def fetch_data(self, max_messages=10):   
         data = []
         try:
-            received_messages = self.sqs.receive_messages(max_messages=5, wait_time_seconds=20)
+            received_messages = self.sqs.receive_messages(max_messages=max_messages, wait_time_seconds=20)
             for message in received_messages:
-                rh  = message['ReceiptHandle']
-                mid = message['MessageId']
                 data.append(json.loads(message.get('Body')))
 
-                self.sqs.delete_message(receipt_handle=rh)
-                #print(f'deleted: {mid}')
+                sqs_details =   {
+                                    "receipt_handle"    :  message['ReceiptHandle'],
+                                    "message_id"        : message['MessageId']
+                                }
+                self.handle_arr.append(sqs_details)
+                
             #with open('aws_data.json', 'w') as f:
             #    json.dump(message, f, indent=4)
             #self.sqs.purge_queue()
@@ -1464,13 +1468,14 @@ class CoreUpdateDb:
         except Exception as e:
             print(f"process_account error: {str(e)}")
     
-    def load_from_sqs(self):
+    def load_from_sqs(self, max_messages=10):
         data            = []
         
         #1. Fetch Data From Queue
-        data            = self.fetch_data()
+        data            = self.fetch_data(max_messages=max_messages)
         account_id   = None
         count       = 0
+        print(f"TOTAL DATASETS FOUND in QUEUE: {len(data)}")
         if(len(data) > 0):
             for d in data:
                 
@@ -1491,6 +1496,9 @@ class CoreUpdateDb:
                     #6. Load Logs Data
                     #core.process_security(data=d['logs'])
                     #print("*"*100)
+                    rh = self.handle_arr[count]
+                    self.sqs.delete_message(receipt_handle=rh['receipt_handle'])
+                    print(f'deleted: {rh}')
                     count = count + 1
             
             print(f"{SUCCESS} Loaded {count} set(s) of data to {DB_NAME} ")
@@ -1583,11 +1591,15 @@ def test_connection():
 
 def lambda_handler(event=None, context=None):
     if(test_connection()):
-        print("tested")
         try:
+            # Get max_messages from event or use default value of 10
+            max_messages = 10
+            if event and isinstance(event, dict) and 'max_messages' in event:
+                max_messages = int(event['max_messages'])
+                
             core = CoreUpdateDb()  # Replace with your core class initialization
-            test = core.load_from_sqs()
-            print(test)
+            test = core.load_from_sqs(max_messages=max_messages)
+            #print(test)
         except Exception as e:
             print(f"Failed to process file: {str(e)}")
     else:
