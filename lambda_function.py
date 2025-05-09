@@ -146,7 +146,7 @@ class SQSManager:
     def receive_messages(self,
                         message_group_id: str = None,  # Kept for compatibility
                         max_messages: int = 10,
-                        wait_time_seconds: int = 50,
+                        wait_time_seconds: int = 0,
                         visibility_timeout: int = 50,
                         message_attributes: List[str] = None) -> List[Dict]:
         """
@@ -955,7 +955,7 @@ class CoreUpdateDb:
     def fetch_data(self, max_messages=10):   
         data = []
         try:
-            received_messages = self.sqs.receive_messages(max_messages=max_messages, wait_time_seconds=20)
+            received_messages = self.sqs.receive_messages(max_messages=max_messages, wait_time_seconds=0)
             for message in received_messages:
                 data.append(json.loads(message.get('Body')))
 
