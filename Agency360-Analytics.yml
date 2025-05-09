@@ -1,0 +1,297 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC with Aurora PostgreSQL RDS and Security Groups for QuickSight, SQS
+
+Resources:
+  # VPC Configuration
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: Obs360-VPC
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Obs360-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: 
+        Ref: VPC
+      InternetGatewayId: 
+        Ref: InternetGateway
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: ap-southeast-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: ap-southeast-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-2
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: ap-southeast-1c
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-3
+
+  # Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: 
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-RT
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: 
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: 
+        Ref: InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet1
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet2
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet3
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  # Security Groups
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS Aurora PostgreSQL
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: Obs360-RDS-SG
+
+  QuickSightSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for QuickSight access
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Obs360-QuickSight-SG
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Aurora PostgreSQL
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+
+  # Aurora PostgreSQL Cluster
+  AuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: obs360-coredb-cluster
+      Engine: aurora-postgresql
+      EngineVersion: '16.6'        # Make sure this version supports Serverless v2
+      DatabaseName: core
+      MasterUsername: postgres
+      ManageMasterUserPassword: true
+      EnableHttpEndpoint: true
+      ServerlessV2ScalingConfiguration:    # Add Serverless v2 configuration
+        MinCapacity: 0.5                   # Minimum ACU (Aurora Capacity Units)
+        MaxCapacity: 16                    # Maximum ACU
+      BackupRetentionPeriod: 1
+      DBSubnetGroupName: 
+        Ref: DBSubnetGroup
+      VpcSecurityGroupIds:
+        - Ref: RDSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: obs360-coredb-cluster
+
+  AuroraDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora-postgresql
+      DBClusterIdentifier: 
+        Ref: AuroraDBCluster
+      DBInstanceClass: db.serverless      # Change to serverless instance class
+      DBSubnetGroupName: 
+        Ref: DBSubnetGroup
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: obs360-coredb-instance
+
+    # SQS Queue
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: obs360-sqs
+      Tags:
+        - Key: Name
+          Value: obs360-sqs
+
+  # SQS Queue Policy
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: 
+        - Ref: SQSQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: "__default_policy_ID"
+        Statement:
+          - Sid: "__owner_statement"
+            Effect: Allow
+            Principal:
+              AWS: 
+                Fn::Sub: arn:aws:iam::${AWS::AccountId}:root
+            Action: SQS:*
+            Resource: 
+              Fn::GetAtt: 
+                - SQSQueue
+                - Arn
+          - Sid: "__sender_statement"
+            Effect: Allow
+            Principal:
+              AWS: 
+                - "arn:aws:iam::357536368434:root"
+                - "arn:aws:iam::137433690462:root"
+                - "arn:aws:iam::423755636010:root"
+                - "arn:aws:iam::615299736125:root"
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueUrl
+            Resource: 
+              Fn::GetAtt: 
+                - SQSQueue
+                - Arn
+
+  # Add SQS endpoint to VPC
+  SQSVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        Ref: VPC
+      ServiceName: 
+        Fn::Sub: com.amazonaws.${AWS::Region}.sqs
+      VpcEndpointType: Interface
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+      SecurityGroupIds:
+        - Ref: RDSSecurityGroup
+      PrivateDnsEnabled: true
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: 
+      Ref: VPC
+
+  RDSEndpoint:
+    Description: Aurora PostgreSQL Cluster Endpoint
+    Value: 
+      Fn::GetAtt: 
+        - AuroraDBCluster
+        - Endpoint.Address
+
+  RDSPort:
+    Description: Aurora PostgreSQL Cluster Port
+    Value: 5432  # Hardcoded PostgreSQL port
+
+  RDSSecurityGroupId:
+    Description: RDS Security Group ID
+    Value: 
+      Ref: RDSSecurityGroup
+
+  QuickSightSecurityGroupId:
+    Description: QuickSight Security Group ID
+    Value: 
+      Ref: QuickSightSecurityGroup
+
+  DBClusterSecretArn:
+    Description: The ARN of the auto-generated secret storing the master user password
+    Value: 
+      Fn::GetAtt: 
+        - AuroraDBCluster
+        - MasterUserSecret.SecretArn
+
+  SQSQueueURL:
+    Description: URL of the SQS Queue
+    Value:
+      Ref: SQSQueue
+  
+  SQSQueueARN:
+    Description: ARN of the SQS Queue
+    Value:
+      Fn::GetAtt:
+        - SQSQueue
+        - Arn
