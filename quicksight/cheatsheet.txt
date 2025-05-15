@@ -1,0 +1,24 @@
+//Quicksight Calculated Fields
+
+//calc_date_to_granularity
+ifelse(
+    ${granularity} = 'MONTHLY',
+    truncDate('MM', {date_to}),
+    ifelse(
+        ${granularity} = 'YEARLY',
+        truncDate('YYYY', {date_to}),
+        {date_to}
+    )
+)
+
+
+//calc_date_from_granularity
+ifelse(
+    ${granularity} = 'MONTHLY',
+    parseDate(formatDate({date_from}, 'yyyy-MM-01')),
+    ifelse(
+        ${granularity} = 'YEARLY',
+        parseDate(formatDate({date_from}, 'yyyy-01-01')),
+        {date_from}
+    )
+)
