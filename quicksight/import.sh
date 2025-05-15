@@ -2,10 +2,12 @@
 
 # Variables - Replace these with your specific values
 export AWS_ACCOUNT_ID="615299736125"  # Target account for import
-export IMPORT_JOB_ID="615299736125-useast1-quicksight-import"
+export IMPORT_JOB_ID="615299736125-agency-360-qs-no-dep-import"
+#export IMPORT_JOB_ID="615299736125-agency-360-qs-all-dep-import"
 export REGION="us-east-1"
-export S3_BUCKET_NAME="agency360-use-east"
-export S3_FILE_PATH="temp.qs"
+export S3_BUCKET_NAME="agency360"
+export S3_FILE_PATH="agency360-no-deps.qs"
+#export S3_FILE_PATH="agency360-all-dep.qs"
 
 # Step 0: Verify AWS credentials
 echo "Verifying AWS credentials..."

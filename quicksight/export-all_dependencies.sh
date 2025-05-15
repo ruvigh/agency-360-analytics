@@ -2,13 +2,13 @@
 
 # Variables - Replace these with your specific values
 export AWS_ACCOUNT_ID="615299736125"  # Source account for export
-export EXPORT_JOB_ID="615299736125-quicksight-aexport"
+export EXPORT_JOB_ID="615299736125-qs-agency360-all-dep-export"
 export REGION="ap-southeast-1"  # E.g., us-east-1
 export S3_BUCKET_NAME="observability360-apac-sg-moe"
 export S3_FOLDER_PATH="quicksight"
-export DASHBOARD_ID="7dacee59-6b35-41dd-a08d-62619b149a7d"
-export ANALYSIS_ID="f317480f-53be-4c09-8e40-6c3580875de7"
-export LOCAL_BUNDLE_PATH="$HOME/projects/agency-360-analytics/quicksight/temp2.qs"
+export DASHBOARD_ID="d8010740-c7a5-4cde-a0fc-19dcde7e2be0"
+export ANALYSIS_ID="752a8cb3-d9b2-44e0-b0a2-113d582a4243"
+export LOCAL_BUNDLE_PATH="$HOME/projects/agency-360-analytics/quicksight/agency360-all-dep.qs"
 
 # Step 0: Verify AWS credentials
 echo "Verifying AWS credentials..."
