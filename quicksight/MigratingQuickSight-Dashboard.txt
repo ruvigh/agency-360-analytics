@@ -1,0 +1,96 @@
+#Migrating QuickSight Analysis from 1 Account to Another
+
+export SOURCE_AWS_ACCOUNT_ID="615299736125"
+export SOURCE_EXPORT_JOB_ID="$SOURCE_AWS_ACCOUNT_ID-qs-agency360-no-dep-export"
+export SOURCE_ANALYSIS_ID="752a8cb3-d9b2-44e0-b0a2-113d582a4243"
+
+export TARGET_AWS_ACCOUNT_ID="880265509649"  # Add this new variable
+export TARGE_IMPORT_JOB_ID="$TARGET_AWS_ACCOUNT_ID-qs-agency360-no-dep-import"
+
+export REGION="ap-southeast-1"
+
+export SOURCE_S3_URI="s3://$S3_BUCKET_NAME/$S3_FOLDER_PATH"
+
+export LOCAL_BUNDLE_PATH="$HOME/projects/agency-360-analytics/quicksight/agency360-analysis.qs"
+
+export ANALYSIS_ARN="arn:aws:quicksight:$REGION:$SOURCE_AWS_ACCOUNT_ID:analysis/$SOURCE_ANALYSIS_ID"
+
+#1. Export the QuickSight Analysis from the Source Account
+aws sts get-caller-identity
+
+aws quicksight start-asset-bundle-export-job \
+    --aws-account-id $SOURCE_AWS_ACCOUNT_ID \
+    --asset-bundle-export-job-id $SOURCE_EXPORT_JOB_ID \
+    --resource-arns "[\"$SOURCE_ANALYSIS_ARN\"]" \
+    --include-permissions \
+    --export-format QUICKSIGHT_JSON \
+    --region $REGION > $LOCAL_BUNDLE_PATH
+
+
+
+#2. Get the Dataset from the Target Account (Account that you are transfering to)
+aws sts get-caller-identity
+
+aws quicksight list-data-sets --aws-account-id $TARGET_AWS_ACCOUNT_ID --region $REGION
+
+#3. Convert the .qs to .zip then unzip it
+#Once it is locally downloaded runt he following command
+#Create a temp Directory and move it there
+mkdir temp
+mv agency360-analysis.qs temp/agency360-analysis.zip
+cd temp
+#mv agency360-analysis.qs agency360-analysis.zip
+unzip agency360-analysis.zip
+
+#4. Map the Data Set
+#Navigate to the analysis folder inside agency360-analysis the and open the json file
+
+#4a. Get the TARGET DATASET CONFIGURATION
+#4b. Open the json file and copy the exact dataset arn from the target account
+#4c. paste it in the place of the source dataset arn in the source json file
+#4d. save the file and then zip it back
+
+zip -r agency360-analysis.zip *
+mv agency360-analysis.zip temp/agency360-analysis.qs
+
+#5. upload the qs to the target account s3 directory
+
+
+#6. Import the QuickSight Analysis to the Target Account
+
+aws sts get-caller-identity
+aws quicksight start-asset-bundle-import-job \
+    --aws-account-id 880265509649 \
+    --asset-bundle-import-job-id  "880265509649-qs-agency360-no-dep-import-logs"\
+    --asset-bundle-import-source "{\"S3Uri\": \"s3://sst-s3-moe-cis-core-prd-common/quicksight/agency360-analysis.qs\"}" \
+    --override-permissions '{
+        "Analyses": [
+            {
+                "AnalysisIds": ["752a8cb3-d9b2-44e0-b0a2-113d582a4243"],
+                "Permissions": {
+                    "Principals": ["arn:aws:quicksight:ap-southeast-1:880265509649:user/default/AWSReservedSSO_agency_admin_9bddf84767825e38/jagdish_singh_rawat@tech.gov.sg"],
+                    "Actions": [
+                        "quicksight:RestoreAnalysis",
+                        "quicksight:UpdateAnalysisPermissions",
+                        "quicksight:DeleteAnalysis",
+                        "quicksight:DescribeAnalysisPermissions",
+                        "quicksight:QueryAnalysis",
+                        "quicksight:DescribeAnalysis",
+                        "quicksight:UpdateAnalysis"
+                    ]
+                }
+            }
+        ],
+        "DataSets": [{
+            "DataSetIds": ["*"],
+            "Permissions": {
+                "Principals": ["arn:aws:quicksight:ap-southeast-1:880265509649:user/default/AWSReservedSSO_agency_admin_9bddf84767825e38/jagdish_singh_rawat@tech.gov.sg"],
+                "Actions": [
+                    "quicksight:DescribeDataSet",
+                    "quicksight:UpdateDataSet",
+                    "quicksight:QueryDataSet"
+                ]
+            }
+        }]
+    }'
+

@@ -1,14 +1,3 @@
---01 Table Modification
-
--- Remove UNIQUE constraint from account_email
-ALTER TABLE accounts 
-DROP CONSTRAINT IF EXISTS accounts_account_email_key;
-
--- Remove UNIQUE constraint from account_arn
-ALTER TABLE accounts 
-DROP CONSTRAINT IF EXISTS accounts_account_arn_key;
-
-
 -- Createing Views
 --1. View Accounts merged with Services
 CREATE OR REPLACE VIEW view_acct_serv AS
@@ -74,7 +63,7 @@ SELECT sc.id,
        sc.created_at
 FROM accounts a
          JOIN cost_reports cr ON cr.account_id = a.id
-         JOIN service_costs sc ON sc.cost_report_id = cr.id
+         JOIN service_costs sc ON sc.cost_report_id = cr.id;
 
 --4. View Accoutns, COst Report and Cost forecast
 CREATE OR REPLACE VIEW view_acct_cost_rep_forecast AS
@@ -116,7 +105,7 @@ SELECT cr.id,
        cr.period_end - cr.period_start                                                        AS period_duration_days
 FROM accounts a
          JOIN cost_reports cr ON cr.account_id = a.id
-         LEFT JOIN cost_forecasts cf ON cf.cost_report_id = cr.id
+         LEFT JOIN cost_forecasts cf ON cf.cost_report_id = cr.id;
 
 
 -- 5. View Accounts & Security
@@ -390,7 +379,7 @@ FROM accounts a
          LEFT JOIN products p ON pa.product_id = p.id
 GROUP BY a.id, a.account_id, a.account_name, a.account_email, a.account_status, a.joined_method, a.joined_timestamp,
          a.created_at, a.updated_at
-ORDER BY a.account_name
+ORDER BY a.account_name;
 
 
 -- 10. View Product and its accounts
@@ -429,7 +418,7 @@ FROM accounts a
          LEFT JOIN product_accounts pa ON a.id = pa.account_id
          LEFT JOIN products p ON pa.product_id = p.id
          LEFT JOIN account_product_counts apc ON a.id = apc.account_id
-ORDER BY a.account_name, p.name
+ORDER BY a.account_name, p.name;
 
 -- 11. View Account and Logs data to check the loading of data
 CREATE OR REPLACE VIEW view_acct_logs AS
@@ -563,7 +552,7 @@ FROM accounts a
 INNER JOIN logs l ON a.id = l.account_id
 INNER JOIN log_messages lm ON l.id = lm.log_id
 ORDER BY
-    lm.created_at DESC
+    lm.created_at DESC;
 
 
 -- 13. View Account, Product, Security, Cost, Services Summary
