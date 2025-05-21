@@ -8,6 +8,7 @@ import os
 from typing import List, Dict, Any, Optional, Union
 from botocore.exceptions import ClientError
 from datetime import datetime, timedelta, date
+from urllib.parse import urlparse
 
 """ GLOBAL VARIABLES """
 SUCCESS         = "🟢"  # Green dot
@@ -292,7 +293,13 @@ class TestAwsServices:
                                                         },
                                     'rds-data'           : {
                                                             'name'      : 'Aurora RDS',
-                                                            'client'    : boto3.client('rds-data'),
+                                                            'client'    : boto3.client('rds-data', region_name=REGION),
+                                                            'action'    : 'close',
+                                                            'params'    : params
+                                                        },
+                                    's3'                : {
+                                                            'name'      : 's3',
+                                                            'client'    : boto3.client('s3', region_name=REGION),
                                                             'action'    : 'close',
                                                             'params'    : params
                                                         }
@@ -349,7 +356,7 @@ class DBManager:
         Initialize the DBManager with database configuration
         """
         self.database       = database_name
-        self.client         = boto3.client('rds-data')
+        self.client         = boto3.client('rds-data', region_name=REGION)
         self.cluster_arn    = cluster_arn if(cluster_arn) else os.environ.get('AURORA_CLUSTER_ARN')
         self.secret_arn     = secret_arn if(secret_arn) else os.environ.get('AURORA_SECRET_ARN')
 
@@ -1468,8 +1475,35 @@ class CoreUpdateDb:
         except Exception as e:
             print(f"process_account error: {str(e)}")
 
+    def read_s3_file(self, s3_path):
+        """
+        Read JSON data from S3 path
+        s3_path format: s3://bucket-name/path/to/file.json
+        """
+        try:
+            # Parse S3 URL
+            parsed_url = urlparse(s3_path)
+            bucket_name = parsed_url.netloc
+            s3_key = parsed_url.path.lstrip('/')  # Remove leading slash
+            
+            # Create S3 client
+            s3_client = boto3.client('s3')
+            
+            # Get object from S3
+            response = s3_client.get_object(Bucket=bucket_name,Key=s3_key)
+            
+            # Read and parse JSON data
+            json_data = json.loads(response['Body'].read().decode('utf-8'))
+            return json_data
+            
+        except Exception as e:
+            print(f"\n✗ Error reading from S3: {str(e)}")
+            return None
+        
     def load_from_sqs(self, max_messages=10):
         data            = []
+        s3_client       = boto3.client('s3')
+        
 
         #1. Fetch Data From Queue
         data            = self.fetch_data(max_messages=max_messages)
@@ -1477,12 +1511,15 @@ class CoreUpdateDb:
         count       = 0
         print(f"TOTAL DATASETS FOUND in QUEUE: {len(data)}")
         if(len(data) > 0):
-            for d in data:
-
+            for a in data:
+                d = self.read_s3_file(a['path'])
                 #2. Load Account Data
                 account         = self.process_account(data=d['account'])
                 account_id      = account['id']
 
+                parsed_url      = urlparse(a['path'])
+                bucket_name     = parsed_url.netloc
+                s3_key          = parsed_url.path.lstrip('/')
 
                 if(account_id):
                     #3. Load Services Data
@@ -1498,6 +1535,8 @@ class CoreUpdateDb:
                     #print("*"*100)
                     rh = self.handle_arr[count]
                     self.sqs.delete_message(receipt_handle=rh['receipt_handle'])
+                    print(f"Deleting file: s3://{bucket_name}/{s3_key}")
+                    s3_client.delete_object(Bucket=bucket_name,Key=s3_key)
                     print(f'deleted: {rh}')
                     count = count + 1
 
@@ -1606,5 +1645,5 @@ def lambda_handler(event=None, context=None):
         return False
 
 # Uncomment the line below for development only
-#if __name__ == "__main__":
-#    lambda_handler()
+if __name__ == "__main__":
+    lambda_handler()
