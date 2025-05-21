@@ -111,9 +111,9 @@ class SQSManager:
 
     def send_message(self,
                     message: Union[str, Dict],
-                    message_group_id: str = None,  # Kept for compatibility
-                    message_deduplication_id: str = None,  # Kept for compatibility
-                    message_attributes: Dict = None,
+                    message_group_id: str = None,  # Kept for compatibility # type: ignore
+                    message_deduplication_id: str = None,  # Kept for compatibility # type: ignore
+                    message_attributes: Dict = None, # type: ignore
                     delay_seconds: int = 0) -> Optional[Dict]:
         """
         Send a message to the queue
@@ -144,11 +144,11 @@ class SQSManager:
             return None
 
     def receive_messages(self,
-                        message_group_id: str = None,  # Kept for compatibility
+                        message_group_id: str = None,  # Kept for compatibility # type: ignore
                         max_messages: int = 10,
                         wait_time_seconds: int = 0,
                         visibility_timeout: int = 50,
-                        message_attributes: List[str] = None) -> List[Dict]:
+                        message_attributes: List[str] = None) -> List[Dict]: # type: ignore
         """
         Receive messages from the queue
         Args:

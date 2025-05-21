@@ -1,0 +1,580 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC with Aurora PostgreSQL RDS, Security Groups, Lambda Function, and SQS Integration
+
+Parameters:
+  AuroraClusterArn:
+    Type: String
+    Description: Aurora Cluster ARN
+    Default: arn:aws:rds:ap-southeast-1:${AccountId}:cluster:obs360-coredb-cluster
+
+  AuroraSecretArn:
+    Type: String
+    Description: Aurora Secret ARN
+    Default: arn:aws:secretsmanager:ap-southeast-1:${AccountId}:secret:rds!cluster-a64bace9-09db-4718-a96f-4a9739cbcb37-WRQt9Q
+
+  DBName:
+    Type: String
+    Description: Database name
+    Default: core
+
+  Region:
+    Type: String
+    Description: AWS Region
+    Default: ap-southeast-1
+
+  SQSQueueArn:
+    Type: String
+    Description: SQS Queue ARN
+    Default: arn:aws:sqs:ap-southeast-1:${AccountId}:obs360-sqs
+
+  KMSKeyArn:
+    Type: String
+    Description: KMS Key ARN
+    Default: arn:aws:kms:ap-southeast-1:${AWS::AccountId}:key/b0e661df-af2f-468a-a4d1-6ae23ecca9c7
+
+Resources:
+  # VPC Configuration
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: Obs360-VPC
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Obs360-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: 
+        Ref: VPC
+      InternetGatewayId: 
+        Ref: InternetGateway
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: ap-southeast-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: ap-southeast-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-2
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: 
+        Ref: VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: ap-southeast-1c
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-Subnet-3
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: 
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: Obs360-Public-RT
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: 
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: 
+        Ref: InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet1
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet2
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: 
+        Ref: PublicSubnet3
+      RouteTableId: 
+        Ref: PublicRouteTable
+
+  # Security Groups
+  QuickSightVPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for QuickSight VPC Endpoint
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: Obs360-QuickSight-Endpoint-SG
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS Aurora PostgreSQL
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref QuickSightVPCEndpointSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Obs360-RDS-SG
+
+  QuickSightSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for QuickSight access
+      VpcId: 
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Obs360-QuickSight-SG
+
+  # QuickSight VPC Endpoint
+  QuickSightVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        Ref: VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.quicksight
+      VpcEndpointType: Interface
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+      SecurityGroupIds:
+        - Ref: QuickSightVPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Aurora PostgreSQL
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+
+  # Aurora PostgreSQL Cluster
+  AuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: obs360-coredb-cluster
+      Engine: aurora-postgresql
+      EngineVersion: '16.6'
+      DatabaseName: core
+      MasterUsername: postgres
+      ManageMasterUserPassword: true
+      EnableHttpEndpoint: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 16
+      BackupRetentionPeriod: 1
+      DBSubnetGroupName: 
+        Ref: DBSubnetGroup
+      VpcSecurityGroupIds:
+        - Ref: RDSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: obs360-coredb-cluster
+
+  AuroraDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora-postgresql
+      DBClusterIdentifier: 
+        Ref: AuroraDBCluster
+      DBInstanceClass: db.serverless
+      DBSubnetGroupName: 
+        Ref: DBSubnetGroup
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: obs360-coredb-instance
+
+  # SQS Queue
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: obs360-sqs
+      Tags:
+        - Key: Name
+          Value: obs360-sqs
+
+  # SQS Queue Policy
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: 
+        - Ref: SQSQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: "__default_policy_ID"
+        Statement:
+          - Sid: "__owner_statement"
+            Effect: Allow
+            Principal:
+              AWS: 
+                Fn::Sub: arn:aws:iam::${AWS::AccountId}:root
+            Action: SQS:*
+            Resource: 
+              Fn::GetAtt: 
+                - SQSQueue
+                - Arn
+          - Sid: "__sender_statement"
+            Effect: Allow
+            Principal:
+              AWS: 
+                - "arn:aws:iam::357536368434:root"
+                - "arn:aws:iam::137433690462:root"
+                - "arn:aws:iam::423755636010:root"
+                - "arn:aws:iam::615299736125:root"
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueUrl
+            Resource: 
+              Fn::GetAtt: 
+                - SQSQueue
+                - Arn
+
+  # SQS VPC Endpoint
+  SQSVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        Ref: VPC
+      ServiceName: 
+        Fn::Sub: com.amazonaws.${AWS::Region}.sqs
+      VpcEndpointType: Interface
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+      SecurityGroupIds:
+        - Ref: RDSSecurityGroup
+      PrivateDnsEnabled: true
+  # Lambda SQS Event Source Mapping
+  LambdaSQSEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: 
+        Fn::GetAtt:
+          - SQSQueue
+          - Arn
+      FunctionName: 
+        Fn::GetAtt:
+          - LambdaFunction
+          - Arn
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: obs360-rds-vpc-lambda
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: Obs360ServicesAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowS3ReadAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - arn:aws:s3:::observability360-apac-sg-moe
+                  - arn:aws:s3:::observability360-apac-sg-moe/*
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecrets
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:ListQueues
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                  - sts:GetSessionToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - account:GetContactInformation
+                  - account:GetAlternateContact
+                  - account:GetAccountInformation
+                  - account:GetPrimaryEmail
+                  - account:GetRegionOptStatus
+                  - account:ListRegions
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - organizations:ListAccounts
+                  - organizations:ListAWSServiceAccessForOrganization
+                  - organizations:DescribeAccount
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - resiliencehub:ListAppAssessments
+                  - resiliencehub:ListAppAssessmentResourceDrifts
+                  - resiliencehub:ListApps
+                  - resiliencehub:ListMetrics
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetAnomalies
+                  - ce:GetAnomalyMonitors
+                  - ce:GetCostCategories
+                  - ce:GetDimensionValues
+                  - ce:GetPreferences
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - securityhub:GetFindings
+                  - securityhub:DescribeHub
+                  - securityhub:GetEnabledStandards
+                  - securityhub:ListConfigurationPolicies
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - trustedadvisor:ListOrganizationRecommendationResources
+                  - trustedadvisor:DescribeAccountAccess
+                  - trustedadvisor:DescribeAccount
+                  - support:GetInteraction
+                  - support:SearchForCases
+                  - support:DescribeTrustedAdvisorCheckResult
+                  - support:DescribeTrustedAdvisorChecks
+                  - support:DescribeTrustedAdvisorCheckSummaries
+                  - support:DescribeServices
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - config:GetResourceConfigHistory
+                  - config:SelectResourceConfig
+                  - config:DescribeConfigurationRecorders
+                  - config:DescribeConfigurationRecorderStatus
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - health:DescribeEvents
+                  - health:DescribeEventDetails
+                  - health:DescribeAffectedEntities
+                Resource: "*"
+        - PolicyName: Obs360AnalyticsAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:BeginTransaction
+                  - rds-data:CommitTransaction
+                  - rds-data:RollbackTransaction
+                Resource: 
+                  Ref: AuroraClusterArn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:SendMessage
+                Resource: 
+                  Ref: SQSQueueArn
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: 
+                  Ref: AuroraSecretArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: 
+                  Ref: KMSKeyArn
+
+  # Lambda Function
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: obs360-analytics-function
+      Handler: index.lambda_handler
+      Role: 
+        Fn::GetAtt:
+          - LambdaExecutionRole
+          - Arn
+      Code:
+        ZipFile: |
+          [Your Lambda function code here]
+      Runtime: python3.10
+      Timeout: 300
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - Ref: RDSSecurityGroup
+        SubnetIds:
+          - Ref: PublicSubnet1
+          - Ref: PublicSubnet2
+          - Ref: PublicSubnet3
+      Environment:
+        Variables:
+          AURORA_CLUSTER_ARN: 
+            Ref: AuroraClusterArn
+          AURORA_SECRET_ARN: 
+            Ref: AuroraSecretArn
+          DB_NAME: 
+            Ref: DBName
+          REGION: 
+            Ref: Region
+          SQS_QUEUE_ARN: 
+            Ref: SQSQueueArn
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: 
+      Ref: VPC
+
+  RDSEndpoint:
+    Description: Aurora PostgreSQL Cluster Endpoint
+    Value: 
+      Fn::GetAtt: 
+        - AuroraDBCluster
+        - Endpoint.Address
+
+  RDSPort:
+    Description: Aurora PostgreSQL Cluster Port
+    Value: 5432
+
+  RDSSecurityGroupId:
+    Description: RDS Security Group ID
+    Value: 
+      Ref: RDSSecurityGroup
+
+  QuickSightSecurityGroupId:
+    Description: QuickSight Security Group ID
+    Value: 
+      Ref: QuickSightSecurityGroup
+
+  DBClusterSecretArn:
+    Description: The ARN of the auto-generated secret storing the master user password
+    Value: 
+      Fn::GetAtt: 
+        - AuroraDBCluster
+        - MasterUserSecret.SecretArn
+
+  SQSQueueURL:
+    Description: URL of the SQS Queue
+    Value:
+      Ref: SQSQueue
+  
+  SQSQueueARN:
+    Description: ARN of the SQS Queue
+    Value:
+      Fn::GetAtt: 
+        - SQSQueue
+        - Arn
+
+  LambdaFunctionArn:
+    Description: Lambda Function ARN
+    Value: 
+      Fn::GetAtt:
+        - LambdaFunction
+        - Arn
+
+  LambdaRoleArn:
+    Description: Lambda Execution Role ARN
+    Value:
+      Fn::GetAtt:
+        - LambdaExecutionRole
+        - Arn
