@@ -1,6 +1,18 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: VPC with Aurora PostgreSQL RDS and Security Groups for QuickSight, SQS
 
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to create
+    Default: obs360-data-bucket
+
+  # Add parameter for sender accounts (comma-separated list)
+  SenderAccounts:
+    Type: CommaDelimitedList
+    Description: List of AWS account IDs that can send data (comma-separated)
+    Default: !Ref AWS::AccountId
+
 Resources:
   # VPC Configuration
   VPC:
@@ -151,20 +163,21 @@ Resources:
         - Ref: PublicSubnet2
         - Ref: PublicSubnet3
 
-  # Aurora PostgreSQL Cluster
+    # Aurora PostgreSQL Cluster
   AuroraDBCluster:
     Type: AWS::RDS::DBCluster
     Properties:
       DBClusterIdentifier: obs360-coredb-cluster
       Engine: aurora-postgresql
-      EngineVersion: '16.6'        # Make sure this version supports Serverless v2
+      EngineVersion: '16.6'
+      Port: 5432  # Explicitly set PostgreSQL port
       DatabaseName: core
       MasterUsername: postgres
       ManageMasterUserPassword: true
       EnableHttpEndpoint: true
-      ServerlessV2ScalingConfiguration:    # Add Serverless v2 configuration
-        MinCapacity: 0.5                   # Minimum ACU (Aurora Capacity Units)
-        MaxCapacity: 16                    # Maximum ACU
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 16
       BackupRetentionPeriod: 1
       DBSubnetGroupName: 
         Ref: DBSubnetGroup
@@ -220,11 +233,11 @@ Resources:
           - Sid: "__sender_statement"
             Effect: Allow
             Principal:
-              AWS: 
-                - "arn:aws:iam::357536368434:root"
-                - "arn:aws:iam::137433690462:root"
-                - "arn:aws:iam::423755636010:root"
-                - "arn:aws:iam::615299736125:root"
+              AWS: !Split
+                - ","
+                - !Join
+                  - ","
+                  - !Ref SenderAccounts 
             Action:
               - sqs:SendMessage
               - sqs:GetQueueUrl
@@ -232,6 +245,47 @@ Resources:
               Fn::GetAtt: 
                 - SQSQueue
                 - Arn
+
+  # S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      Tags:
+        - Key: Name
+          Value: !Ref S3BucketName
+
+  # S3 Bucket Policy
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowOwnerFullAccess"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${S3Bucket}"
+              - !Sub "arn:aws:s3:::${S3Bucket}/*"
+          - Sid: "AllowSenderPutOnly"
+            Effect: Allow
+            Principal:
+              AWS: !Split
+                - ","
+                - !Join
+                  - ","
+                  - !Ref SenderAccounts
+            Action:
+              - "s3:PutObject"
+              - "s3:ListBucket"
+            Resource:
+              - !Sub "arn:aws:s3:::${S3Bucket}"
+              - !Sub "arn:aws:s3:::${S3Bucket}/*"
+
 
   # Add SQS endpoint to VPC
   SQSVPCEndpoint:
@@ -250,6 +304,22 @@ Resources:
         - Ref: RDSSecurityGroup
       PrivateDnsEnabled: true
 
+  QuickSightVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        Ref: VPC
+      ServiceName: 
+        Fn::Sub: com.amazonaws.${AWS::Region}.quicksight
+      VpcEndpointType: Interface
+      SubnetIds:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+      SecurityGroupIds:
+        - Ref: QuickSightSecurityGroup
+      PrivateDnsEnabled: true
+
 Outputs:
   VPCId:
     Description: VPC ID
@@ -265,7 +335,11 @@ Outputs:
 
   RDSPort:
     Description: Aurora PostgreSQL Cluster Port
-    Value: 5432  # Hardcoded PostgreSQL port
+    Value: 
+      Fn::GetAtt:
+        - AuroraDBCluster
+        - Endpoint.Port
+
 
   RDSSecurityGroupId:
     Description: RDS Security Group ID
