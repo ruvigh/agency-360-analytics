@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 SUCCESS         = "🟢"  # Green dot
 FAIL            = "🟡"  # yellow dot
 ERROR           = "🔴"  # Warning sign
+DELETED         = "🗑️"  # Deleted
 
 DB_NAME         = os.environ.get("DB_NAME")
 ARN_AURORA      = os.environ.get("AURORA_CLUSTER_ARN")
@@ -42,7 +43,8 @@ AWS_TYPECAST_2  =   {
                                                             'period_start',
                                                             'period_end',
                                                             'date_from',
-                                                            'date_to'
+                                                            'date_to',
+                                                            'date_created'
                                                         ],
                         'period_granularity_type'   :   [
                                                             'period_granularity'
@@ -95,13 +97,10 @@ class SQSManager:
             str: Queue URL
         """
         try:
-            response = self.sqs.get_queue_url(
-                QueueName=self.queue_name,
-                QueueOwnerAWSAccountId=self.account_id
-            )
+            response = self.sqs.get_queue_url(QueueName=self.queue_name,QueueOwnerAWSAccountId=self.account_id)
             return response['QueueUrl']
         except ClientError as e:
-            print(f"Error getting queue URL: {e}")
+            print(f"{ERROR} Error getting queue URL: {e}")
             raise
 
     def _generate_deduplication_id(self, message: Union[str, Dict]) -> str:
@@ -141,14 +140,14 @@ class SQSManager:
             response = self.sqs.send_message(**params)
             return response
         except ClientError as e:
-            print(f"Error sending message: {e}")
+            print(f"{ERROR} Error sending message: {e}")
             return None
 
     def receive_messages(self,
                         message_group_id: str = None,  # Kept for compatibility # type: ignore
                         max_messages: int = 10,
                         wait_time_seconds: int = 0,
-                        visibility_timeout: int = 50,
+                        visibility_timeout: int = 300,
                         message_attributes: List[str] = None) -> List[Dict]: # type: ignore
         """
         Receive messages from the queue
@@ -178,7 +177,7 @@ class SQSManager:
 
             return response.get('Messages', [])
         except ClientError as e:
-            print(f"Error receiving messages: {e}")
+            print(f"{ERROR} Error receiving messages: {e}")
             return []
 
     def send_message_batch(self, messages: List[Dict]) -> Dict[str, List]:
@@ -224,7 +223,7 @@ class SQSManager:
                 'failed': failed
             }
         except ClientError as e:
-            print(f"Error sending message batch: {e}")
+            print(f"{ERROR} Error sending message batch: {e}")
             return {'successful': [], 'failed': [str(i) for i in range(len(messages))]}
 
     def delete_message(self, receipt_handle: str) -> bool:
@@ -242,7 +241,7 @@ class SQSManager:
             )
             return True
         except ClientError as e:
-            print(f"Error deleting message: {e}")
+            print(f"{ERROR} Error deleting message: {e}")
             return False
 
     def purge_queue(self) -> bool:
@@ -254,13 +253,13 @@ class SQSManager:
         """
         try:
             self.sqs.purge_queue(QueueUrl=self.queue_url)
-            print("Queue purged successfully")
+            print(f"{SUCCESS} Queue purged successfully")
             return True
         except ClientError as e:
             if 'AWS.SimpleQueueService.PurgeQueueInProgress' in str(e):
                 print("Purge already in progress. Please wait 60 seconds before retrying.")
             else:
-                print(f"Error purging queue: {e}")
+                print(f"{ERROR} Error purging queue: {e}")
             return False
 
 """ 2. TEST AWS SERVICES MANAGER """
@@ -418,7 +417,7 @@ class DBManager:
 
             return columns
         except Exception as e:
-            print(f"Error extracting column names: {str(e)}")
+            print(f"{ERROR} Error extracting column names: {str(e)}")
             return []
 
     """ def _format_results(self, response, column_names, results=[]):
@@ -533,20 +532,20 @@ class DBManager:
         # PostgreSQL error codes
         if "SQLState: 23505" in error_str:  # Unique violation
             constraint_name = error_str.split('"')[1] if '"' in error_str else "unknown"
-            print(f"Duplicate key error in {operation}: The record already exists (constraint: {constraint_name})")
+            print(f"{ERROR} Duplicate key error in {operation}: The record already exists (constraint: {constraint_name})")
 
             # Handle specific constraints
             if "accounts_account_id_key" in error_str:
-                print(f"Account already exists in the database")
+                print(f"{FAIL} Account already exists in the database")
 
         elif "SQLState: 23503" in error_str:  # Foreign key violation
-            print(f"Foreign key violation in {operation}: Referenced record does not exist")
+            print(f"{FAIL} Foreign key violation in {operation}: Referenced record does not exist")
 
         elif "SQLState: 23502" in error_str:  # Not null violation
-            print(f"Not null violation in {operation}: Required field is missing")
+            print(f"{FAIL} Not null violation in {operation}: Required field is missing")
 
         else:
-            print(f"{operation.capitalize()} error: {error_str}")
+            print(f"{FAIL} {operation.capitalize()} error: {error_str}")
 
     def _get_postgres_type(self, col: str, typecast_map: Dict) -> Optional[str]:
         """Get the PostgreSQL type for a column"""
@@ -589,7 +588,7 @@ class DBManager:
             )
             return response['transactionId']
         except ClientError as e:
-            print(f"Failed to begin transaction: {e}")
+            print(f"{FAIL} Failed to begin transaction: {e}")
             raise
 
     def execute_transaction(self, sql_statements: List[Dict], transaction_id: str) -> List[Dict]:
@@ -616,7 +615,7 @@ class DBManager:
             return results
 
         except ClientError as e:
-            print(f"Transaction execution failed: {e}")
+            print(f"{FAIL} Transaction execution failed: {e}")
             self.rollback_transaction(transaction_id)
             raise
 
@@ -631,7 +630,7 @@ class DBManager:
                 transactionId   = transaction_id
             )
         except ClientError as e:
-            print(f"Failed to commit transaction: {e}")
+            print(f"{FAIL} Failed to commit transaction: {e}")
             raise
 
     def rollback_transaction(self, transaction_id: str) -> None:
@@ -645,7 +644,7 @@ class DBManager:
                 transactionId   = transaction_id
             )
         except ClientError as e:
-            print(f"Failed to rollback transaction: {e}")
+            print(f"{FAIL} Failed to rollback transaction: {e}")
             raise
 
     def batch_execute_statement(self, sql: str, parameter_sets: List[Dict]) -> Dict:
@@ -665,7 +664,7 @@ class DBManager:
             return response
 
         except ClientError as e:
-            print(f"Batch execution failed: {e}")
+            print(f"{FAIL} Batch execution failed: {e}")
             raise
 
     def process_results(self, response: Dict) -> List[Dict]:
@@ -791,7 +790,7 @@ class DBManager:
 
         except Exception as e:
             self._handle_db_error(e, "insert")
-            print(str(e))
+            print(f"{FAIL} Insert Error: {str(e)}")
             return None
 
     def bulk_insert(self, table: str, data: List[Dict[str, Any]]) -> bool:
@@ -825,7 +824,7 @@ class DBManager:
             return True
         except Exception as e:
             self._handle_db_error(e, "insert")
-            print(f"Bulk insert error: {str(e)}")
+            print(f"{FAIL} Bulk insert error: {str(e)}")
             return False
 
     def update(self, table: str, data: Dict[str, Any], condition: str, params: Dict) -> bool:
@@ -860,7 +859,7 @@ class DBManager:
             return True
 
         except Exception as e:
-            print(f"Update error: {str(e)}")
+            print(f"{FAIL} Update error: {str(e)}")
             return False
 
     def delete(self, table: str, condition: str, params: Dict) -> bool:
@@ -891,9 +890,9 @@ class DBManager:
             self.execute_statement(query, params)
             return True
         except Exception as e:
-            print(f"Delete error: {str(e)}")
-            print(f"Query: {query}")
-            print(f"Parameters: {params}")
+            print(f"{FAIL} Delete error: {str(e)}")
+            print(f"{FAIL} Query: {query}")
+            print(f"{FAIL} Parameters: {params}")
             return False
 
     def execute(self, sql: str, parameters: Dict[str, Any]) -> Dict:
@@ -918,7 +917,7 @@ class DBManager:
             )
             return response
         except Exception as e:
-            print(f"Database operation failed: {str(e)}")
+            print(f"{FAIL} Database operation failed: {str(e)}")
             raise
 
     def execute_transaction(self, queries: List[Dict[str, Any]]) -> bool:
@@ -939,7 +938,7 @@ class DBManager:
                 self.rollback_transaction(transaction_id)
                 raise e
         except Exception as e:
-            print(f"Transaction error: {str(e)}")
+            print(f"{FAIL} Transaction error: {str(e)}")
             return False
 
 """ 4. CORE DB MANAGER """
@@ -977,7 +976,7 @@ class CoreUpdateDb:
             #self.sqs.purge_queue()
             return data
         except Exception as e:
-            print(f"fetch_data error: {str(e)}")
+            print(f"{FAIL} fetch_data error: {str(e)}")
 
     def _convert_python_list_string_to_array(self, input_data: Union[str, List]) -> str:
         """
@@ -999,7 +998,7 @@ class CoreUpdateDb:
                 elements = [str(elem).strip().strip("'").strip('"') for elem in input_data]
 
             else:
-                print(f"Unsupported input type: {type(input_data)}")
+                print(f"{FAIL} Unsupported input type: {type(input_data)}")
                 return "{}"
 
             # Convert to PostgreSQL array format
@@ -1008,7 +1007,7 @@ class CoreUpdateDb:
             return postgres_array
 
         except Exception as e:
-            print(f"Error converting to array: {str(e)}")
+            print(f"{FAIL} Error converting to array: {str(e)}")
             return "{}"
 
     #1. Process and insert/update Account Data
@@ -1043,8 +1042,6 @@ class CoreUpdateDb:
                 'joined_method'     : data['joined_method'] if(data['joined_method'] != None) else 'Access Restricted',
                 'joined_timestamp'  : data['joined_timestamp'] if(data['joined_timestamp'] != None) else date.today()
             }
-
-            print(account_data)
             try:
                 if not existing_account:
                     # Insert new account
@@ -1053,7 +1050,7 @@ class CoreUpdateDb:
                         response['id']                  = result['id']
                         response['stats']['created']    += 1
                         response['success']             = True
-                        print(f"Created new account for {result['account_id']}")
+                        print(f"{SUCCESS} Created new account for {result['account_id']}")
                     else:
                         raise Exception("Failed to insert new account")
                 else:
@@ -1080,11 +1077,11 @@ class CoreUpdateDb:
                 return response
 
             except Exception as e:
-                print(f"Account Processing Error: {str(e)}")
+                print(f"{FAIL} Account Processing Error: {str(e)}")
                 return response
 
         except Exception as e:
-            print(f"Account Checking Error: {str(e)}")
+            print(f"{FAIL} Account Checking Error: {str(e)}")
             return response
 
     #2. Process Service Data
@@ -1190,7 +1187,7 @@ class CoreUpdateDb:
                             raise Exception(f"Failed to insert service: {service_data['service']}")
 
                 except Exception as e:
-                    print(f"Error processing service {service_data.get('service')}: {str(e)}")
+                    print(f"{FAIL} Error processing service {service_data.get('service')}: {str(e)}")
                     raise
 
             #print(f"Processing complete: {inserted_count} inserted, {updated_count} updated, {skipped_count} skipped")
@@ -1201,7 +1198,7 @@ class CoreUpdateDb:
             return  True
 
         except Exception as e:
-            print(f"Error processing services data: {str(e)}")
+            print(f"{FAIL} Error processing services data: {str(e)}")
             return False
 
     def _is_service_data_changed(self, existing_data: Dict, new_params: Dict) -> bool:
@@ -1262,7 +1259,7 @@ class CoreUpdateDb:
                     report['period']['start'],
                     report['period']['end']
                 )
-                #print(report)
+                
                 # Prepare cost report data
                 cost_report_data = {
                     'account_id': account_id,
@@ -1300,8 +1297,6 @@ class CoreUpdateDb:
                     # Insert new cost report
                     cost_report = self.db.insert('cost_reports', cost_report_data)
                     cost_report_id = cost_report['id']
-
-                    print(cost_report_id)
 
                     if cost_report_id:
                         self.stats['CREATED'] += 1
@@ -1346,7 +1341,7 @@ class CoreUpdateDb:
             return self.stats
 
         except Exception as e:
-            print(f"Error processing cost data: {str(e)}")
+            print(f"{FAIL} Error processing cost data: {str(e)}")
             raise
 
     #4. Security
@@ -1426,16 +1421,16 @@ class CoreUpdateDb:
                             if self.db.update("findings", finding, condition, {'id': existing_finding['id']}):
                                 successful_updates += 1
                             else:
-                                print(f"Failed to update finding: {existing_finding['id']}")
+                                print(f"{FAIL} Failed to update finding: {existing_finding['id']}")
                         else:
                             # Insert new finding
                             if self.db.insert("findings", finding):
                                 successful_inserts += 1
                             else:
-                                print(f"Failed to insert finding: {finding.get('id')}")
+                                print(f"{FAIL} Failed to insert finding: {finding.get('id')}")
 
                     except Exception as e:
-                        print(f"Error processing finding {finding['finding_id']}: {str(e)}")
+                        print(f"{FAIL} Error processing finding {finding['finding_id']}: {str(e)}")
                         continue
 
                 #print(f"Processing completed: {successful_inserts} inserted, {successful_updates} updated")
@@ -1445,7 +1440,7 @@ class CoreUpdateDb:
                 return  True
 
         except Exception as e:
-            print(f"Error processing security data: {str(e)}")
+            print(f"{FAIL} Error processing security data: {str(e)}")
             raise
 
     def load_security_findings(self, data: List[Dict], account_id: int) -> Dict:
@@ -1457,23 +1452,56 @@ class CoreUpdateDb:
             for security_data in data:
                 self.process_security_data(account_id, security_data)
 
-            #print(f"Loading complete: {self.stats}")
             return self.stats
 
         except Exception as e:
             print(f"Error: {str(e)}")
             self.stats['CREATED']   += 0
-            self.stats['UPDATED']    += 0
+            self.stats['UPDATED']   += 0
             self.stats['SKIPPED']   += 0
 
             return True
 
     #5. Process Logs
-    def process_logs(self, data):
+    def process_logs(self, account_id, data):
         try:
-            print(data)
+            logs    = data['logs']
+            date_of_entry = datetime.strptime(data['service'][0]['date_to'], '%Y-%m-%d') if(len(data['service']) > 0) else datetime.now()
+            logs_data = {
+                'account_id'        : account_id,
+                'date_created'      : date_of_entry,
+                'account_status'    : logs['account'],
+                'cost_status'       : logs['cost'],
+                'service_status'    : logs['service'],
+                'security_status'   : logs['security'],
+                'created_at'        : date_of_entry,
+                'updated_at'        : datetime.now()
+            }
+            log_update          = self.db.insert('logs', logs_data)
+            
+            log_id              = log_update['id']
+            logs_messages       = logs['message']
+            if log_id:
+                if(len(logs_messages) > 0):
+                    for m in logs_messages:
+                        msg_type, msg_text = next(iter(m.items()))
+                        log_message = {
+                            'log_id'        : log_id,
+                            'message'       : msg_text,
+                            'message_type'  : msg_type,
+                            'created_at'    : date_of_entry
+                        }
+                        log_msg = self.db.insert('log_messages', log_message)
+                        if log_msg['id']:
+                            self.stats['CREATED'] += 1
+                        else:
+                            raise Exception("Failed to Insert Log Message")
+                    
+            else:
+                raise Exception("Failed to Insert logs")
+       
         except Exception as e:
-            print(f"process_account error: {str(e)}")
+            print(f"{FAIL}process_logs error: {str(e)}")
 
     def read_s3_file(self, s3_path):
         """
@@ -1497,19 +1525,21 @@ class CoreUpdateDb:
             return json_data
             
         except Exception as e:
-            print(f"\n✗ Error reading from S3: {str(e)}")
+            print(f"\n{ERROR} Error reading from S3: {str(e)}")
             return None
         
-    def load_from_sqs(self, max_messages=10):
+    def load_from_sqs(self, max_messages=100):
         data            = []
         s3_client       = boto3.client('s3')
         
 
         #1. Fetch Data From Queue
-        data            = self.fetch_data(max_messages=max_messages)
-        account_id   = None
+        data        = self.fetch_data(max_messages=max_messages)
+        account_id  = None
         count       = 0
-        print(f"TOTAL DATASETS FOUND in QUEUE: {len(data)}")
+        
+        print(f"# Data in SQS : {len(data)}")
+
         if(len(data) > 0):
             for a in data:
                 d = self.read_s3_file(a['path'])
@@ -1524,105 +1554,33 @@ class CoreUpdateDb:
                 if(account_id):
                     #3. Load Services Data
                     self.process_services(account_pk=account_id, data=d['service'])
+                    
                     #4. Load Cost Data
                     self.process_cost_data(account_id= account_id, data=d['cost'])
-                    #print("-"*100)
+                    
                     #5. Load Security Data
                     self.load_security_findings(account_id= account_id, data=d['security'])
-                    #print("-"*100)
+                    
                     #6. Load Logs Data
-                    #core.process_security(data=d['logs'])
-                    #print("*"*100)
+                    self.process_logs(account_id, data=d)
+                    
                     rh = self.handle_arr[count]
+                    
+                    #Delete the Message in SQS
                     self.sqs.delete_message(receipt_handle=rh['receipt_handle'])
-                    print(f"Deleting file: s3://{bucket_name}/{s3_key}")
+                    
+                    #Delete the File in S3
                     s3_client.delete_object(Bucket=bucket_name,Key=s3_key)
-                    print(f'deleted: {rh}')
+
+                    print(f'{SUCCESS} Loaded & Deleted : SQS: {rh['message_id']}, S3: s3://{bucket_name}/{s3_key}')
                     count = count + 1
 
             print(f"{SUCCESS} Loaded {count} set(s) of data to {DB_NAME} ")
             return self.stats
-            #print(len(data))
         else:
             print(f"{ERROR} EMPTY SQS: {ARN_SQS}")
 
-    def load_from_file(self, json_file_path):
-        try:
-            # Read the JSON file
-            print(f"Reading data from {json_file_path}")
-            with open(json_file_path, 'r') as file:
-                file_data = json.load(file)
-
-            if not file_data.get('data'):
-                print("No data found in file")
-                return
-
-            count = 0
-            total_records = len(file_data['data'])
-            account_id = None
-
-            print(f"Found {total_records} records to process")
-
-            for d in file_data['data']:
-                try:
-                    print(f"\nProcessing record {count + 1}/{total_records}")
-                    print("-" * 50)
-
-                    # 1. Load Account Data
-                    #account = core.process_account(data=d.get('account', {}))
-                    #account_id = account.get('id')
-
-                    if not account_id:
-                        print("✗ No account ID found, skipping record")
-                        #continue
-
-                    #print(f"✓ Account processed: {account_id}")
-
-                    # 2. Load Services Data
-                    if 'service' in d:
-                        #core.process_services(account_pk=account_id, data=d['service'])
-                        print("✓ Services data processed")
-                    else:
-                        print("- No services data found")
-
-                    # 3. Load Cost Data
-                    if 'cost' in d:
-                        #core.process_cost_data(account_id=account_id, data=d['cost'])
-                        print("✓ Cost data processed")
-                    else:
-                        print("- No cost data found")
-
-                    # 4. Load Security Data
-                    if 'security' in d:
-                        #core.load_security_findings(account_id=account_id, data=d['security'])
-                        print("✓ Security data processed")
-                    else:
-                        print("- No security data found")
-
-                    # Optional: Load Logs Data
-                    if 'logs' in d:
-                    #     core.process_security(data=d['logs'])
-                        print("✓ Logs data processed")
-
-                    count += 1
-                    print(f"Progress: {count}/{total_records} records processed")
-
-                except Exception as e:
-                    print(f"✗ Error processing record: {str(e)}")
-                    continue
-
-            print("\nProcessing Summary")
-            print(f"Total records           : {total_records}")
-            print(f"Successfully processed  : {count}")
-            print(f"Failed                  : {total_records - count}")
-
-        except FileNotFoundError:
-            print(f"✗ Error: The file {json_file_path} was not found")
-        except json.JSONDecodeError:
-            print(f"✗ Error: The file {json_file_path} contains invalid JSON")
-        except Exception as e:
-            print(f"✗ Error: An unexpected error occurred: {str(e)}")
-
+  
 """ 5. METHODS FOR LAMBDA """
 def test_connection():
     check = TestAwsServices()
@@ -1630,18 +1588,21 @@ def test_connection():
 
 def lambda_handler(event=None, context=None):
     if(test_connection()):
+        print("*"*15,"Connected","*"*15)
         try:
             # Get max_messages from event or use default value of 10
-            max_messages = 10
+            max_messages = 1
             if event and isinstance(event, dict) and 'max_messages' in event:
                 max_messages = int(event['max_messages'])
 
             core = CoreUpdateDb()  # Replace with your core class initialization
-            test = core.load_from_sqs(max_messages=max_messages)
-            #print(test)
+            test = core.load_from_sqs(max_messages=10)
         except Exception as e:
-            print(f"Failed to process file: {str(e)}")
+            print(f"{ERROR} Failed to process file - {str(e)}")
+
+        print("*"*14,"Disconnected","*"*13)
     else:
+        print("*"*13,"Not Connected","*"*13)
         return False
 
 # Uncomment the line below for development only
