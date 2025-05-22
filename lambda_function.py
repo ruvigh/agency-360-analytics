@@ -268,7 +268,7 @@ class TestAwsServices:
         # Get current date and 30 days ago for CE
         self.end_date           = datetime.now()
         self.start_date         = self.end_date - timedelta(days=30)
-        self.obs360_services    = {
+        self.agency360_services    = {
                                     'sts'                : {
                                                             'name'      : 'STS',
                                                             'client'    : boto3.client('sts'),
@@ -329,7 +329,7 @@ class TestAwsServices:
         failed  = 0
         counter = 0
 
-        for key, val in self.obs360_services.items():
+        for key, val in self.agency360_services.items():
             self._run_test(val)
 
             if val['status'] == True:

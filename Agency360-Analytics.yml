@@ -5,7 +5,7 @@ Parameters:
   S3BucketName:
     Type: String
     Description: Name of the S3 bucket to create
-    Default: obs360-data-bucket
+    Default: agency360-data-bucket
 
   # Add parameter for sender accounts (comma-separated list)
   SenderAccounts:
@@ -167,7 +167,7 @@ Resources:
   AuroraDBCluster:
     Type: AWS::RDS::DBCluster
     Properties:
-      DBClusterIdentifier: obs360-coredb-cluster
+      DBClusterIdentifier: agency360-coredb-cluster
       Engine: aurora-postgresql
       EngineVersion: '16.6'
       Port: 5432  # Explicitly set PostgreSQL port
@@ -185,7 +185,7 @@ Resources:
         - Ref: RDSSecurityGroup
       Tags:
         - Key: Name
-          Value: obs360-coredb-cluster
+          Value: agency360-coredb-cluster
 
   AuroraDBInstance:
     Type: AWS::RDS::DBInstance
@@ -199,16 +199,16 @@ Resources:
       PubliclyAccessible: false
       Tags:
         - Key: Name
-          Value: obs360-coredb-instance
+          Value: agency360-coredb-instance
 
     # SQS Queue
   SQSQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: obs360-sqs
+      QueueName: agency360-sqs
       Tags:
         - Key: Name
-          Value: obs360-sqs
+          Value: agency360-sqs
 
   # SQS Queue Policy
   SQSQueuePolicy:
