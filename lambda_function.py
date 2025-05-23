@@ -21,6 +21,7 @@ ARN_AURORA      = os.environ.get("AURORA_CLUSTER_ARN")
 ARN_SECRET      = os.environ.get("AURORA_SECRET_ARN")
 ARN_SQS         = os.environ.get("SQS_QUEUE_ARN")
 REGION          = os.environ.get("REGION")
+BUCKET          = os.environ.get("BUCKET")
 
 AWS_TYPECASTS   =   {
                         'created_at': 'timestamp with time zone',
@@ -420,27 +421,6 @@ class DBManager:
             print(f"{ERROR} Error extracting column names: {str(e)}")
             return []
 
-    """ def _format_results(self, response, column_names, results=[]):
-        result = {}
-
-        for record in response['records']:
-                # Create dictionary with column names and values
-                result = {}
-                for i, value in enumerate(record):
-                    # Extract the actual value from the dictionary
-                    actual_value = None
-                    if value:
-                        # Get the first non-null value from the dictionary
-                        for val_type in value.values():
-                            if val_type is not None:
-                                actual_value = val_type
-                                break
-
-                    result[column_names[i]] = actual_value
-
-                results.append(result)
-
-        return results """
     def _format_results(self, response: Dict, column_names: List[str], single_result: bool = False) -> Union[List[Dict], Optional[Dict]]:
         """
         Format query results
@@ -518,7 +498,6 @@ class DBManager:
         except Exception as e:
             self._handle_db_error(e, "select")
             return []
-
 
     def _handle_db_error(self, error: Exception, operation: str) -> None:
         """
@@ -1351,12 +1330,12 @@ class CoreUpdateDb:
             SELECT id FROM findings
             WHERE  finding_id = :finding_id
             AND resource_id = :resource_id
-            AND security_id = :security_id
+            AND security_id = :security_id::int
         """
         params = {
             'finding_id': finding.get('finding_id'),
             'resource_id': finding.get('resource_id'),
-            'security_id': finding.get('security_id')
+            'security_id': int(finding.get('security_id'))
         }
         return self.db.select_one(query, params)
 
@@ -1408,7 +1387,8 @@ class CoreUpdateDb:
                 for finding in security_data['findings']:
                     try:
                         # Add security_id to the finding
-                        finding['security_id'] = security_id
+                        #finding['security_id'] = security_id
+                        finding['security_id'] = int(security_id) if security_id else None
 
                         # Check if finding exists
                         existing_finding = self._finding_exists(finding)
@@ -1525,7 +1505,7 @@ class CoreUpdateDb:
             return json_data
             
         except Exception as e:
-            print(f"\n{ERROR} Error reading from S3: {str(e)}")
+            #print(f"{ERROR} Error reading from S3 {bucket_name}/{s3_key}: {str(e)}")
             return None
         
     def load_from_sqs(self, max_messages=100):
@@ -1537,48 +1517,62 @@ class CoreUpdateDb:
         data        = self.fetch_data(max_messages=max_messages)
         account_id  = None
         count       = 0
+        loaded      = 0
         
-        print(f"# Data in SQS : {len(data)}")
+        print(f"Available Data in SQS : {len(data)}")
 
         if(len(data) > 0):
+            print(f"(*Once the data is processed the records will be DELETED from the SQS Queue {ARN_SQS} and the file from the S3 Bucket {BUCKET})")
             for a in data:
-                d = self.read_s3_file(a['path'])
-                #2. Load Account Data
-                account         = self.process_account(data=d['account'])
-                account_id      = account['id']
+                rh  = self.handle_arr[count]
+                d   = self.read_s3_file(a['path'])
+                if(d is not None):
+                    #2. Load Account Data
+                    account         = self.process_account(data=d['account'])
+                    account_id      = account['id']
 
-                parsed_url      = urlparse(a['path'])
-                bucket_name     = parsed_url.netloc
-                s3_key          = parsed_url.path.lstrip('/')
+                    parsed_url      = urlparse(a['path'])
+                    bucket_name     = parsed_url.netloc
+                    s3_key          = parsed_url.path.lstrip('/')
 
-                if(account_id):
-                    #3. Load Services Data
-                    self.process_services(account_pk=account_id, data=d['service'])
-                    
-                    #4. Load Cost Data
-                    self.process_cost_data(account_id= account_id, data=d['cost'])
-                    
-                    #5. Load Security Data
-                    self.load_security_findings(account_id= account_id, data=d['security'])
-                    
-                    #6. Load Logs Data
-                    self.process_logs(account_id, data=d)
-                    
-                    rh = self.handle_arr[count]
+                    if(account_id):
+                        #3. Load Services Data
+                        self.process_services(account_pk=account_id, data=d['service'])
+                        
+                        #4. Load Cost Data
+                        self.process_cost_data(account_id= account_id, data=d['cost'])
+                        
+                        #5. Load Security Data
+                        self.load_security_findings(account_id= account_id, data=d['security'])
+                        
+                        #6. Load Logs Data
+                        self.process_logs(account_id, data=d)
+                        
+                        #Delete the File in S3
+                        s3_client.delete_object(Bucket=bucket_name,Key=s3_key)
+
+                        #Delete the Message in SQS
+                        self.sqs.delete_message(receipt_handle=rh['receipt_handle'])
+                        count = count + 1
+                        loaded = loaded + 1
+
+                        print(f'{SUCCESS} Success - Processed from SQS: {rh["message_id"]} & S3: s3://{bucket_name}/{s3_key}')
+                        
+                else:
+                    print(f'{ERROR} Error - File does not exist in {a["path"]}, Message {rh["message_id"]} DELETED from SQS Queue')
                     
                     #Delete the Message in SQS
                     self.sqs.delete_message(receipt_handle=rh['receipt_handle'])
-                    
-                    #Delete the File in S3
-                    s3_client.delete_object(Bucket=bucket_name,Key=s3_key)
-
-                    print(f'{SUCCESS} Loaded & Deleted : SQS: {rh['message_id']}, S3: s3://{bucket_name}/{s3_key}')
                     count = count + 1
-
-            print(f"{SUCCESS} Loaded {count} set(s) of data to {DB_NAME} ")
-            return self.stats
+                    continue
+            #print(f"{SUCCESS} Loaded {loaded}/{count} set(s) of data to {DB_NAME} ")
         else:
-            print(f"{ERROR} EMPTY SQS: {ARN_SQS}")
+            print(f"{FAIL} No Records found in SQS: {ARN_SQS}")
+
+        self.stats['TOTAL']     = count
+        self.stats['LOADED']    = loaded
+        
+        return self.stats
 
   
 """ 5. METHODS FOR LAMBDA """
@@ -1586,25 +1580,53 @@ def test_connection():
     check = TestAwsServices()
     return check.test_obs_360_connection()
 
+def process_data_status(status):
+    status_arr = [0, 0, 0]
+    
+    if(len(status) > 0):
+        status_arr = [
+            status['CREATED'],
+            status['UPDATED'],
+            status['SKIPPED'],
+            status['TOTAL'],
+            status['LOADED'],
+        ]
+    
+    loaded      = f"{SUCCESS} Loaded: {status_arr[4]} Records"
+    not_loaded  = f"{ERROR} Not Loaded: {status_arr[3] - status_arr[4]} Records"
+    total       = f"{SUCCESS} Total Processed: {status_arr[3]} Records"
+
+    created = f"{SUCCESS} Created: {status_arr[0]} Records"
+    updated = f"{FAIL} Updated: {status_arr[1]} Records"
+    skipped = f"{ERROR} Skipped: {status_arr[2]} Records"
+
+    return [total, loaded, not_loaded]
+
 def lambda_handler(event=None, context=None):
+    result = {}
     if(test_connection()):
         print("*"*15,"Connected","*"*15)
         try:
             # Get max_messages from event or use default value of 10
-            max_messages = 1
+            max_messages = 10
             if event and isinstance(event, dict) and 'max_messages' in event:
                 max_messages = int(event['max_messages'])
 
-            core = CoreUpdateDb()  # Replace with your core class initialization
-            test = core.load_from_sqs(max_messages=10)
+            core    = CoreUpdateDb()  # Replace with your core class initialization
+            result  = core.load_from_sqs(max_messages=max_messages)
+
         except Exception as e:
             print(f"{ERROR} Failed to process file - {str(e)}")
-
         print("*"*14,"Disconnected","*"*13)
+
+        res = process_data_status(result)
+        return res
+
     else:
         print("*"*13,"Not Connected","*"*13)
         return False
 
 # Uncomment the line below for development only
 if __name__ == "__main__":
-    lambda_handler()
+    temp = lambda_handler()
+    print(temp)

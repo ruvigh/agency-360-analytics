@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: VPC with Aurora PostgreSQL RDS and Security Groups for QuickSight, SQS
+Description: Agency 360 - Analytics Account, S3 Bucket, KMS, Secrets Manager and VPC with Aurora PostgreSQL RDS and Security Groups for QuickSight, SQS
 
 Parameters:
   S3BucketName:
@@ -11,7 +11,7 @@ Parameters:
   SenderAccounts:
     Type: CommaDelimitedList
     Description: List of AWS account IDs that can send data (comma-separated)
-    Default: !Ref AWS::AccountId
+    Default: "123456789012"
 
 Resources:
   # VPC Configuration
@@ -206,6 +206,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: agency360-sqs
+      VisibilityTimeout: 300
       Tags:
         - Key: Name
           Value: agency360-sqs
@@ -233,11 +234,10 @@ Resources:
           - Sid: "__sender_statement"
             Effect: Allow
             Principal:
-              AWS: !Split
-                - ","
-                - !Join
-                  - ","
-                  - !Ref SenderAccounts 
+              AWS: 
+                Fn::Select:
+                  - 0
+                  - Ref: SenderAccounts
             Action:
               - sqs:SendMessage
               - sqs:GetQueueUrl
@@ -274,18 +274,16 @@ Resources:
           - Sid: "AllowSenderPutOnly"
             Effect: Allow
             Principal:
-              AWS: !Split
-                - ","
-                - !Join
-                  - ","
-                  - !Ref SenderAccounts
+              AWS: 
+                Fn::Select:
+                  - 0
+                  - Ref: SenderAccounts
             Action:
               - "s3:PutObject"
               - "s3:ListBucket"
             Resource:
               - !Sub "arn:aws:s3:::${S3Bucket}"
               - !Sub "arn:aws:s3:::${S3Bucket}/*"
-
 
   # Add SQS endpoint to VPC
   SQSVPCEndpoint:
@@ -294,7 +292,7 @@ Resources:
       VpcId:
         Ref: VPC
       ServiceName: 
-        Fn::Sub: com.amazonaws.${AWS::Region}.sqs
+        !Sub "com.amazonaws.${AWS::Region}.sqs"
       VpcEndpointType: Interface
       SubnetIds:
         - Ref: PublicSubnet1
@@ -310,7 +308,7 @@ Resources:
       VpcId:
         Ref: VPC
       ServiceName: 
-        Fn::Sub: com.amazonaws.${AWS::Region}.quicksight
+        Fn::Sub: com.amazonaws.${AWS::Region}.quicksight-website
       VpcEndpointType: Interface
       SubnetIds:
         - Ref: PublicSubnet1
@@ -319,29 +317,66 @@ Resources:
       SecurityGroupIds:
         - Ref: QuickSightSecurityGroup
       PrivateDnsEnabled: true
+  
+  #KMS Key
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Agency360 Secrets Manager
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Secrets Manager to use the key
+            Effect: Allow
+            Principal:
+              Service: 'secretsmanager.amazonaws.com'
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:CreateGrant
+              - kms:DescribeKey
+            Resource: '*'
 
+  KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/agency360-key
+      TargetKeyId: !Ref KMSKey
 Outputs:
   VPCId:
     Description: VPC ID
     Value: 
       Ref: VPC
 
-  RDSEndpoint:
+  AuroraClusterArn:
+    Description: Aurora PostgreSQL Cluster ARN
+    Value: 
+      Fn::GetAtt:
+        - AuroraDBCluster
+        - DBClusterArn
+        
+  AuroraRDSEndpoint:
     Description: Aurora PostgreSQL Cluster Endpoint
     Value: 
       Fn::GetAtt: 
         - AuroraDBCluster
         - Endpoint.Address
 
-  RDSPort:
+  AuroraRDSPort:
     Description: Aurora PostgreSQL Cluster Port
     Value: 
       Fn::GetAtt:
         - AuroraDBCluster
         - Endpoint.Port
 
-
-  RDSSecurityGroupId:
+  AuroraRDSSecurityGroupId:
     Description: RDS Security Group ID
     Value: 
       Ref: RDSSecurityGroup
@@ -351,7 +386,7 @@ Outputs:
     Value: 
       Ref: QuickSightSecurityGroup
 
-  DBClusterSecretArn:
+  AuroraSecretArn:
     Description: The ARN of the auto-generated secret storing the master user password
     Value: 
       Fn::GetAtt: 
@@ -369,3 +404,12 @@ Outputs:
       Fn::GetAtt:
         - SQSQueue
         - Arn
+
+  KMSKeyArn:
+    Description: KMS Key ARN
+    Value: !GetAtt KMSKey.Arn
+
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: 
+      Ref: S3Bucket

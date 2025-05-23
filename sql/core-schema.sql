@@ -10,6 +10,8 @@ CREATE TABLE accounts (
     account_arn VARCHAR(255) NOT NULL,
     joined_method VARCHAR(50) NOT NULL,
     joined_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    account_type VARCHAR(50),
+    csp VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

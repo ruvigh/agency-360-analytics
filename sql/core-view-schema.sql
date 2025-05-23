@@ -6,6 +6,9 @@ SELECT
     s.account_id,
     a.account_id as account,
     a.account_name as account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     s.service,
     s.date_from,
     s.date_to,
@@ -26,6 +29,9 @@ SELECT
     cr.account_id,
     a.account_id as account,
     a.account_name as account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     concat(initcap(cr.period_granularity::text), ' Cost Report - ',
               to_char(cr.period_end::timestamp with time zone, 'DD Mon YYYY'::text)) AS cost_report_name,
 
@@ -48,61 +54,64 @@ INNER JOIN cost_reports as cr ON cr.account_id = a.id;
 --3. View Accounts merged with Cost Reports, Service Costs
 CREATE OR REPLACE VIEW view_acct_serv_cost AS
 SELECT sc.id,
-       a.id                                                                          AS account_id,
-       a.account_id                                                                  AS account,
-       a.account_name,
-       sc.service_name,
-       round(sc.cost, 2)                                                             AS cost,
-       
-       concat(initcap(cr.period_granularity::text), ' Cost Report - ',
-              to_char(cr.period_end::timestamp with time zone, 'DD Mon YYYY'::text)) AS cost_report_name,
-       cr.period_start as date_from,
-       cr.period_end as date_to,
-       cr.period_granularity,
-       cr.cost_difference_percentage,
-       sc.created_at
+    a.id as account_id,
+    a.account_id as account,
+    a.account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
+    sc.service_name,
+    round(sc.cost, 2) as cost,
+    
+    concat(initcap(cr.period_granularity::text), ' Cost Report - ',
+            to_char(cr.period_end::timestamp with time zone, 'DD Mon YYYY'::text)) AS cost_report_name,
+    cr.period_start as date_from,
+    cr.period_end as date_to,
+    cr.period_granularity,
+    cr.cost_difference_percentage,
+    sc.created_at
 FROM accounts a
-         JOIN cost_reports cr ON cr.account_id = a.id
-         JOIN service_costs sc ON sc.cost_report_id = cr.id;
+    JOIN cost_reports cr ON cr.account_id = a.id
+    JOIN service_costs sc ON sc.cost_report_id = cr.id;
 
 --4. View Accoutns, COst Report and Cost forecast
 CREATE OR REPLACE VIEW view_acct_cost_rep_forecast AS
 SELECT cr.id,
-       cr.account_id,
-       a.account_id                                                                           AS account,
-       a.account_name,
-       concat(initcap(cr.period_granularity::text), ' Cost Report - ',
-              to_char(cr.period_end::timestamp with time zone, 'DD Mon YYYY'::text))          AS cost_report_name,
-       round(cr.current_period_cost, 4)                                                       AS current_period_cost,
-       round(cr.previous_period_cost, 4)                                                      AS previous_period_cost,
-       round(cr.cost_difference, 4)                                                           AS cost_difference,
-       round(cr.cost_difference_percentage, 2)                                                AS cost_difference_percentage,
-       round(cr.potential_monthly_savings, 4)                                                 AS potential_monthly_savings,
-       cr.anomalies_detected,
-       cr.saving_opportunities_count,
-       cr.period_start                                                                        AS date_from,
-       cr.period_end                                                                          AS date_to,
-       cr.period_granularity,
-       
-       round(cf.amount, 4)                                                                    AS forecast_amount,
-       round(cf.prediction_interval_lower_bound, 4)                                           AS forecast_lower_bound,
-       round(cf.prediction_interval_upper_bound, 4)                                           AS forecast_upper_bound,
-       cf.period_start                                                                        AS forecast_period_start,
-       cf.period_end                                                                          AS forecast_period_end,
-       round((cf.amount - cr.current_period_cost) / cr.current_period_cost * 100::numeric,
-             2)                                                                               AS forecast_change_percentage,
-       round(cf.prediction_interval_upper_bound - cf.prediction_interval_lower_bound, 4)      AS forecast_range,
-       round(cf.amount - cr.current_period_cost, 4)                                           AS forecast_absolute_change,
-       round((cf.prediction_interval_upper_bound - cf.prediction_interval_lower_bound) / NULLIF(cf.amount, 0::numeric) *
-             100::numeric,
-             2)                                                                               AS forecast_confidence_range_percentage,
-       CASE
-           WHEN cf.amount > cr.current_period_cost THEN 'Increase'::text
-           WHEN cf.amount < cr.current_period_cost THEN 'Decrease'::text
-           ELSE 'No Change'::text
-           END                                                                                AS forecast_trend,
-       cr.created_at,
-       cr.period_end - cr.period_start                                                        AS period_duration_days
+    cr.account_id,
+    a.account_id  AS account,
+    a.account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
+    concat(initcap(cr.period_granularity::text), ' Cost Report - ',
+            to_char(cr.period_end::timestamp with time zone, 'DD Mon YYYY'::text)) as cost_report_name,
+    round(cr.current_period_cost, 4) as current_period_cost,
+    round(cr.previous_period_cost, 4) as previous_period_cost,
+    round(cr.cost_difference, 4) as cost_difference,
+    round(cr.cost_difference_percentage, 2) as cost_difference_percentage,
+    round(cr.potential_monthly_savings, 4) as potential_monthly_savings,
+    cr.anomalies_detected,
+    cr.saving_opportunities_count,
+    cr.period_start as date_from,
+    cr.period_end as date_to,
+    cr.period_granularity,
+    
+    round(cf.amount, 4) as forecast_amount,
+    round(cf.prediction_interval_lower_bound, 4) as forecast_lower_bound,
+    round(cf.prediction_interval_upper_bound, 4) as forecast_upper_bound,
+    cf.period_start as forecast_period_start,
+    cf.period_end as forecast_period_end,
+    round((cf.amount - cr.current_period_cost) / cr.current_period_cost * 100::numeric,2) as forecast_change_percentage,
+    round(cf.prediction_interval_upper_bound - cf.prediction_interval_lower_bound, 4) as forecast_range,
+    round(cf.amount - cr.current_period_cost, 4) as forecast_absolute_change,
+    round((cf.prediction_interval_upper_bound - cf.prediction_interval_lower_bound) / NULLIF(cf.amount, 0::numeric) * 100::numeric, 2) as forecast_confidence_range_percentage,
+    CASE
+        WHEN cf.amount > cr.current_period_cost THEN 'Increase'::text
+        WHEN cf.amount < cr.current_period_cost THEN 'Decrease'::text
+        ELSE 'No Change'::text
+        END AS forecast_trend,
+    cr.created_at,
+    cr.period_end - cr.period_start as period_duration_days
 FROM accounts a
          JOIN cost_reports cr ON cr.account_id = a.id
          LEFT JOIN cost_forecasts cf ON cf.cost_report_id = cr.id;
@@ -116,7 +125,9 @@ SELECT
     -- Account information
     a.account_id as account,
     a.account_name as account_name,
-
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     -- Security information
     s.service,
     s.total_findings,
@@ -192,6 +203,9 @@ SELECT
     a.id as account_id,
     a.account_id as account,
     a.account_name as account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     f.severity,
     -- Status Counts
     COUNT(*) as total_findings,
@@ -318,6 +332,9 @@ SELECT
     a.id as account_id,
     a.account_id as account,
     a.account_name as account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     DATE_TRUNC('day', f.created_at) as date,
     f.severity,
     f.status,
@@ -355,25 +372,28 @@ ORDER BY
 
 -- 9. View Account and Aggregated products
 CREATE OR REPLACE VIEW view_acct_products AS
-SELECT a.id                                                                    AS account_id,
-       a.account_id                                                            AS account,
-       a.account_name,
-       a.account_email,
-       a.account_status,
-       a.joined_method,
-       a.joined_timestamp,
-       count(DISTINCT p.id)                                                    AS associated_products_count,
-       string_agg(DISTINCT p.name::text, ', '::text ORDER BY (p.name::text))   AS associated_products,
-       string_agg(DISTINCT p.owner::text, ', '::text ORDER BY (p.owner::text)) AS product_owners,
-       CASE
-           WHEN count(p.id) = 0 THEN 'Unassigned'::text
-           WHEN count(p.id) = 1 THEN 'Single Product'::text
-           ELSE 'Multiple Products'::text
-           END                                                                 AS assignment_status,
-       max(pa.updated_at)                                                      AS latest_product_association,
-       EXTRACT(day FROM age(CURRENT_TIMESTAMP, a.joined_timestamp))            AS account_age_days,
-       a.created_at                                                            AS account_created_at,
-       a.updated_at                                                            AS account_updated_at
+SELECT a.id as account_id,
+    a.account_id as account,
+    a.account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
+    a.account_email,
+    a.account_status,
+    a.joined_method,
+    a.joined_timestamp,
+    count(DISTINCT p.id) as associated_products_count,
+    string_agg(DISTINCT p.name::text, ', '::text ORDER BY (p.name::text)) as associated_products,
+    string_agg(DISTINCT p.owner::text, ', '::text ORDER BY (p.owner::text)) as product_owners,
+    CASE
+        WHEN count(p.id) = 0 THEN 'Unassigned'::text
+        WHEN count(p.id) = 1 THEN 'Single Product'::text
+        ELSE 'Multiple Products'::text
+        END AS assignment_status,
+    max(pa.updated_at) as latest_product_association,
+    EXTRACT(day FROM age(CURRENT_TIMESTAMP, a.joined_timestamp))  as account_age_days,
+    a.created_at as account_created_at,
+    a.updated_at as account_updated_at
 FROM accounts a
          LEFT JOIN product_accounts pa ON a.id = pa.account_id
          LEFT JOIN products p ON pa.product_id = p.id
@@ -389,35 +409,38 @@ WITH account_product_counts AS (SELECT a_1.id                 AS account_id,
                                 FROM accounts a_1
                                          LEFT JOIN product_accounts pa_1 ON a_1.id = pa_1.account_id
                                 GROUP BY a_1.id)
-SELECT a.id                                                         AS account_id,
-       a.account_id                                                 AS account,
-       a.account_name,
-       a.account_email,
-       a.account_status,
-       a.joined_method,
-       a.joined_timestamp,
-       p.id                                                         AS product_id,
-       p.name                                                       AS product_name,
-       p.owner                                                      AS product_owner,
-       p."position"                                                 AS product_position,
-       p.description                                                AS product_description,
-       CASE
-           WHEN p.id IS NULL THEN 'Unassigned'::text
-           ELSE 'Assigned'::text
-           END                                                      AS assignment_status,
-       apc.product_count,
-       CASE
-           WHEN apc.product_count = 0 THEN 'No Products'::text
-           WHEN apc.product_count = 1 THEN 'Single Product'::text
-           ELSE 'Multiple Products'::text
-           END                                                      AS product_assignment_type,
-       COALESCE(pa.created_at, a.created_at)                        AS relationship_created_at,
-       COALESCE(pa.updated_at, a.updated_at)                        AS relationship_updated_at,
-       EXTRACT(day FROM age(CURRENT_TIMESTAMP, a.joined_timestamp)) AS account_age_days
+SELECT a.id as account_id,
+    a.account_id as account,
+    a.account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
+    a.account_email,
+    a.account_status,
+    a.joined_method,
+    a.joined_timestamp,
+    p.id as product_id,
+    p.name as product_name,
+    p.owner as product_owner,
+    p."position" as product_position,
+    p.description as product_description,
+    CASE
+        WHEN p.id IS NULL THEN 'Unassigned'::text
+        ELSE 'Assigned'::text
+        END AS assignment_status,
+    apc.product_count,
+    CASE
+        WHEN apc.product_count = 0 THEN 'No Products'::text
+        WHEN apc.product_count = 1 THEN 'Single Product'::text
+        ELSE 'Multiple Products'::text
+        END AS product_assignment_type,
+    COALESCE(pa.created_at, a.created_at) AS relationship_created_at,
+    COALESCE(pa.updated_at, a.updated_at) AS relationship_updated_at,
+    EXTRACT(day FROM age(CURRENT_TIMESTAMP, a.joined_timestamp)) AS account_age_days
 FROM accounts a
-         LEFT JOIN product_accounts pa ON a.id = pa.account_id
-         LEFT JOIN products p ON pa.product_id = p.id
-         LEFT JOIN account_product_counts apc ON a.id = apc.account_id
+    LEFT JOIN product_accounts pa ON a.id = pa.account_id
+    LEFT JOIN products p ON pa.product_id = p.id
+    LEFT JOIN account_product_counts apc ON a.id = apc.account_id
 ORDER BY a.account_name, p.name;
 
 -- 11. View Account and Logs data to check the loading of data
@@ -612,6 +635,9 @@ SELECT
     a.id as account_id,
     a.account_id as account,
     a.account_name,
+    a.csp as account_csp,
+    a.account_type as account_type,
+    CONCAT(a.account_id, ' - ', a.account_name) as account_full,
     a.account_status,
 
     -- Product Count
